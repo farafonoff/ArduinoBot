@@ -1,35 +1,32 @@
 package com.github.farafonoff.arduinobot
 
 import android.content.Context
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
+import android.hardware.SensorManager.SENSOR_DELAY_FASTEST
+import android.hardware.usb.UsbManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Column
-import androidx.compose.material.Button
 import androidx.compose.material.MaterialTheme
 import androidx.compose.material.Surface
 import androidx.compose.material.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.tooling.preview.Preview
 import com.github.farafonoff.arduinobot.ui.theme.ArduinoBotTheme
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.setValue
-import androidx.compose.runtime.collectAsState
+import com.hoho.android.usbserial.driver.UsbSerialDriver
+import com.hoho.android.usbserial.driver.UsbSerialProber
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.asFlow
 import kotlinx.coroutines.flow.flow
-import com.hoho.android.usbserial.driver.UsbSerialProber
-
-import com.hoho.android.usbserial.driver.UsbSerialDriver
-
-import androidx.core.content.ContextCompat.getSystemService
-
-import android.hardware.usb.UsbManager
-import androidx.compose.ui.platform.LocalContext
-import androidx.core.content.ContextCompat
+import kotlinx.coroutines.flow.flowOn
 
 
 class MainActivity : ComponentActivity() {
@@ -37,20 +34,14 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         //val timerFlow = simple()
         setContent {
+            val context = LocalContext.current
+            connectAccelerometer(context)
+            val devices by connectDevice(context).collectAsState(emptyList())
             ArduinoBotTheme {
                 // A surface container using the 'background' color from the theme
                 Surface(color = MaterialTheme.colors.background) {
                     Column {
-                        val context = LocalContext.current
-                        //val value by timerFlow.collectAsState(0)
-                        var greetings by rememberSaveable { mutableStateOf(1) }
-                        val devices by getDevice(context).collectAsState(emptyList())
-                        //Text(text = "Timer $value")
-                        devices.ifEmpty { listOf("No devices attached") }.map { d -> Text(d) }
-                        /*(1..greetings).map { i -> Greeting(name = "Android$i") }
-                        Button(onClick = { greetings = ++greetings }) {
-                            Text("Add greeting")
-                        }*/
+                        DevicesList(devices)
                     }
                 }
             }
@@ -58,34 +49,46 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-fun simple(): Flow<Int> = flow { // sequence builder
-    var i = 1
+fun connectDevice(context: android.content.Context): Flow<List<String>> = flow {
     while (true) {
-        delay(100) // pretend we are computing it
-        ++i
-        emit(i) // yield next value
-    }
-}
+        val devices = justGetDevices(context)
+        emit(devices.map { device -> "${device.device.deviceName}:${device.device.manufacturerName}"})
+        val device = devices.firstOrNull()
+        if (device!=null) {
 
-fun getDevice(context: android.content.Context): Flow<List<String>> = flow {
-    while (true) {
-        emit(justGetDevices(context))
+        }
         delay(1000)
     }
+}.flowOn(Dispatchers.Default)
+
+fun connectAccelerometer(context: android.content.Context) {
+    val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
+    val sensor: Sensor? = sensorManager.getDefaultSensor(Sensor.TYPE_GRAVITY)
+    val triggerEventListener = object : SensorEventListener {
+        override fun onSensorChanged(event: SensorEvent?) {
+            val x = event?.values?.get(0)
+            val y = event?.values?.get(1)
+            val z = event?.values?.get(2)
+        }
+
+        override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {
+        }
+    }
+    sensorManager.registerListener(triggerEventListener, sensor, SENSOR_DELAY_FASTEST)
 }
 
-fun justGetDevices(context: android.content.Context): List<String> {
+fun justGetDevices(context: android.content.Context): List<UsbSerialDriver> {
     val manager = context.getSystemService(Context.USB_SERVICE) as UsbManager?
     val availableDrivers = UsbSerialProber.getDefaultProber().findAllDrivers(manager)
     if (availableDrivers.isEmpty()) {
         return emptyList()
     }
-    return availableDrivers.map { device -> device.device.toString()}
+    return availableDrivers
 }
 
 @Composable
-fun Greeting(name: String) {
-    Text(text = "Hello $name!")
+private fun DevicesList(devices: List<String>) {
+    devices.ifEmpty { listOf("No devices attached") }.map { d -> Text(d) }
 }
 
 @Preview(showBackground = true)
@@ -93,8 +96,7 @@ fun Greeting(name: String) {
 fun DefaultPreview() {
     ArduinoBotTheme {
         Column {
-            Greeting("Android")
-            Button(onClick = { /*TODO*/ }, content = { Text("Add greeting")})
+            DevicesList(emptyList())
         }
     }
 }
