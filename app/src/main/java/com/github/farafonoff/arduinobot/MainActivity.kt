@@ -29,6 +29,8 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlin.math.PI
+import kotlin.math.abs
+import kotlin.math.sign
 import kotlin.math.sqrt
 
 var computedAngle = 0.0
@@ -41,13 +43,15 @@ class MainActivity : ComponentActivity() {
             val context = LocalContext.current
             connectAccelerometer(context)
             val devices by connectDevice(context).collectAsState(emptyList())
-            val angles by timerFlow.map { computedAngle }.collectAsState(initial = 0)
+            val angles by timerFlow.map { computedAngle }.collectAsState(initial = 0.0)
+            var propCoef by remember { mutableStateOf(1.0)}
             ArduinoBotTheme {
                 // A surface container using the 'background' color from the theme
                 Surface(color = MaterialTheme.colors.background) {
                     Column {
                         DevicesList(devices)
                         Text("$angles")
+                        ProportionalCoef(propCoef, { newVal -> propCoef = newVal }, angles * propCoef)
                     }
                 }
             }
@@ -72,14 +76,15 @@ fun connectAccelerometer(context: android.content.Context) {
     val sensor: Sensor? = sensorManager.getDefaultSensor(Sensor.TYPE_GRAVITY)
     val triggerEventListener = object : SensorEventListener {
         override fun onSensorChanged(event: SensorEvent?) {
-            val x = event?.values?.get(0) ?: 0.0f
+            val x = 0.0//event?.values?.get(0) ?: 0.0f
             val y = event?.values?.get(1) ?: 0.0f
             val z = event?.values?.get(2) ?: 0.0f
             val l1 = x*x+y*y;
             val l2 = l1 + z*z;
             val cos = l1 / sqrt(l1.toDouble()) / sqrt(l2.toDouble())
+            val sign = sign(y)
             val angle = kotlin.math.acos(cos)
-            computedAngle = PI/2 - angle
+            computedAngle = (PI/2 - angle)*sign
         }
 
         override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {
@@ -110,7 +115,16 @@ fun ProportionalCoef(value: Double, onValueChange: (Double) -> Unit, computedVal
         Text("Расчет: $computedValue")
         Row {
             var enabled by remember { mutableStateOf(true)}
-            Checkbox(checked = enabled, onCheckedChange = { enabled = !enabled})
+            var disabledValue by remember { mutableStateOf(value)}
+            Checkbox(checked = enabled, onCheckedChange = {
+                enabled = !enabled
+                if (enabled) {
+                    onValueChange(disabledValue)
+                } else {
+                    disabledValue = value;
+                    onValueChange(0.0)
+                }
+            })
             Button(onClick = { onValueChange(value/10) }) {
                 Text("/10")
             }
